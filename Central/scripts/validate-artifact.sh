@@ -21,8 +21,14 @@ hosting="${SITES_PROJECT_ROOT}/dist/.openai/hosting.json"
 # Render build fail.
 if [[ "${RENDER:-}" == "true" || -n "${RENDER_SERVICE_ID:-}" ]]; then
   node --input-type=module - "${worker}" <<'NODE'
-const workerPath = process.argv[1];
-const { default: worker } = await import(new URL(`file://${workerPath}`).href);
+import { pathToFileURL } from "node:url";
+
+// With `node - script`, argv[1] is the literal `-`; the first user argument
+// (the worker path) is argv[2]. Using argv[1] produces file://-/ on Linux.
+const workerPath = process.argv[2];
+const workerUrl = pathToFileURL(workerPath);
+workerUrl.searchParams.set("render-validation", `${process.pid}-${Date.now()}`);
+const worker = await import(workerUrl.href);
 if (!worker || typeof worker.fetch !== "function") {
   throw new Error("dist/server/index.js must have an ESM default export with fetch(request, env, ctx)");
 }
