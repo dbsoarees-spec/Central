@@ -12,8 +12,6 @@ export default defineConfig(({ mode }) => {
   process.env.WRANGLER_LOG_PATH ??= ".wrangler/logs";
   process.env.MINIFLARE_REGISTRY_PATH ??= ".wrangler/registry";
 
-  // Preserve the local CENTRAL_FRETE_* environment loading used by the app,
-  // without importing any OpenAI/hosting-only configuration during Render.
   loadEnv(mode, process.cwd(), "CENTRAL_FRETE_");
 
   return {
@@ -25,5 +23,14 @@ export default defineConfig(({ mode }) => {
         : {}),
     },
     plugins: [vinext(), sites()],
+    build: {
+      rolldownOptions: {
+        // The Render/Node build must never try to resolve Cloudflare's
+        // Worker-only virtual modules. `oduleNam` is also externalized because
+        // Rolldown is currently emitting that truncated virtual import while
+        // processing the RSC server environment.
+        external: ["cloudflare:workers", "oduleNam", "moduleName"],
+      },
+    },
   };
 });
