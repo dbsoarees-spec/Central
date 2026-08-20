@@ -12,6 +12,13 @@ const { d1, r2 } = hostingConfig;
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
 export default defineConfig(async ({ mode }) => {
+  // Render runs the application as a normal Node/Vinext service. It does not
+  // provide Cloudflare Worker bindings during the Vite build, so the
+  // Cloudflare Vite plugin must not be loaded there. Runtime D1 access on
+  // Render is handled by lib/server/d1.ts through the Cloudflare REST API.
+  const isRender =
+    process.env.RENDER === "true" || Boolean(process.env.RENDER_SERVICE_ID);
+
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
   process.env.WRANGLER_WRITE_LOGS ??= "false";
@@ -47,7 +54,15 @@ export default defineConfig(async ({ mode }) => {
   };
 
   // Wrangler snapshots its log path while the Cloudflare plugin is imported.
-  const { cloudflare } = await import("@cloudflare/vite-plugin");
+  // Import it only for Cloudflare builds; importing it on Render causes the
+  // Rollup binding validation to fail because Worker bindings are unavailable.
+  const cloudflarePlugin = isRender
+    ? null
+    : (await import("@cloudflare/vite-plugin")).cloudflare({
+        viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
+        inspectorPort: false,
+        config: localBindingConfig,
+      });
 
   return {
     server: {
@@ -57,14 +72,6 @@ export default defineConfig(async ({ mode }) => {
         ? { watch: { useFsEvents: false, usePolling: true } }
         : {}),
     },
-    plugins: [
-      vinext(),
-      sites(),
-      cloudflare({
-        viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
-        inspectorPort: false,
-        config: localBindingConfig,
-      }),
-    ],
+    plugins: [vinext(), sites(), ...(cloudflarePlugin ? [cloudflarePlugin] : [])],
   };
 });
