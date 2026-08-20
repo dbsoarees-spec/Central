@@ -28,13 +28,9 @@ function base64UrlDecode(value: string) {
 }
 
 export async function configuredValue(name: string) {
-  try {
-    const runtime = await import("cloudflare:workers");
-    const value = (runtime.env as unknown as Record<string, unknown>)[name];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  } catch {
-    // Unit tests run outside the Worker runtime and use process.env.
-  }
+  // Render runs Central as a normal Node/Vinext application. Reading
+  // process.env here also keeps the module bundleable by Vite/Rolldown.
+  // Cloudflare Worker bindings are not available to the Render build.
   const value = process.env[name];
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
