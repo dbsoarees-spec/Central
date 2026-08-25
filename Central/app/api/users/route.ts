@@ -2,7 +2,7 @@ import type { Role } from "@/lib/contracts";
 import { authorize } from "@/lib/server/auth";
 import { ApiError, getD1, jsonError, queryAll } from "@/lib/server/d1";
 import { createPasswordCredential } from "@/lib/server/local-session";
-import { asObject, enumValue, lower, requiredUpper } from "@/lib/server/validation";
+import { asObject, enumValue, requiredUpper } from "@/lib/server/validation";
 
 const ROLES = ["ADMIN", "GERENCIA", "VENDEDOR", "FINANCEIRO"] as const;
 
@@ -50,10 +50,6 @@ export async function POST(request: Request) {
   try {
     const actor = await authorize(request, ["ADMIN"]);
     const payload = asObject(await request.json());
-    const email = lower(payload.email);
-    if (!email || !email.includes("@")) {
-      throw new ApiError(400, "E-mail inválido.");
-    }
     const name = requiredUpper(payload.name, "Nome");
     const role = enumValue(payload.role, "Perfil", ROLES);
     const username = usernameValue(payload.username);
@@ -61,55 +57,46 @@ export async function POST(request: Request) {
     try {
       credential = await createPasswordCredential(payload.password);
     } catch (error) {
-      throw new ApiError(
-        400,
-        error instanceof Error ? error.message : "Senha inválida.",
-      );
+      throw new ApiError(400, error instanceof Error ? error.message : "Senha inválida.");
     }
     const pixDetails = String(payload.pixDetails ?? "").trim() || null;
     const id = crypto.randomUUID();
+    const email = `${username}@centralfrete.local`;
     const db = await getD1();
     await db.batch([
-      db
-        .prepare(
-          `insert into users (
-            id, email, username, password_salt, password_hash, pix_details,
-            name, role, active
-          ) values (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-        )
-        .bind(
-          id,
-          email,
-          username,
-          credential.passwordSalt,
-          credential.passwordHash,
-          pixDetails,
-          name,
-          role,
-        ),
-      db
-        .prepare(
-          `insert into audit_logs (
-            id, entity_type, entity_id, action, actor_user_id, actor_email,
-            new_value, request_id
-          ) values (?, 'USER', ?, 'CREATED', ?, ?, ?, ?)`,
-        )
-        .bind(
-          crypto.randomUUID(),
-          id,
-          actor.id,
-          actor.email,
-          JSON.stringify({ email, username, name, role, pixDetails }),
-          request.headers.get("x-request-id") ?? crypto.randomUUID(),
-        ),
+      db.prepare(
+        `insert into users (
+          id, email, username, password_salt, password_hash, pix_details,
+          name, role, active
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      ).bind(
+        id,
+        email,
+        username,
+        credential.passwordSalt,
+        credential.passwordHash,
+        pixDetails,
+        name,
+        role,
+      ),
+      db.prepare(
+        `insert into audit_logs (
+          id, entity_type, entity_id, action, actor_user_id, actor_email,
+          new_value, request_id
+        ) values (?, 'USER', ?, 'CREATED', ?, ?, ?, ?)`,
+      ).bind(
+        crypto.randomUUID(),
+        id,
+        actor.id,
+        actor.email,
+        JSON.stringify({ username, name, role, pixDetails }),
+        request.headers.get("x-request-id") ?? crypto.randomUUID(),
+      ),
     ]);
     return Response.json({ id }, { status: 201 });
   } catch (error) {
     if (error instanceof Error && error.message.includes("UNIQUE constraint")) {
-      return Response.json(
-        { error: "E-mail ou usuário já cadastrado." },
-        { status: 409 },
-      );
+      return Response.json({ error: "Usuário já cadastrado." }, { status: 409 });
     }
     return jsonError(error);
   }
