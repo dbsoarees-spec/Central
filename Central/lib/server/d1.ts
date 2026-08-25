@@ -60,10 +60,24 @@ function postgresSql(sql: string) {
   return sql.replace(/\?/g, () => `$${++index}`);
 }
 
+function normalizeValue(value: unknown): unknown {
+  if (typeof value === "bigint") return Number(value);
+  if (Array.isArray(value)) return value.map(normalizeValue);
+  if (value && typeof value === "object" && !(value instanceof Date)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, normalizeValue(entry)]),
+    );
+  }
+  return value;
+}
+
 async function execute<T>(sql: string, params: unknown[] = []): Promise<QueryResult<T>> {
   try {
     const rows = await getClient().unsafe(postgresSql(sql), params as any[]);
-    return { success: true, results: rows as T[] };
+    return {
+      success: true,
+      results: (rows as unknown[]).map((row) => normalizeValue(row) as T),
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("central_frete_database_error", { message, sql });
@@ -233,7 +247,7 @@ class SupabaseStorageBucket {
   async delete(path: string) {
     const { url, key } = supabaseConfig();
     const response = await fetch(`${url}/storage/v1/object/${encodeURIComponent(STORAGE_BUCKET)}`, {
-      method: "DELETE",
+      method: "POST",
       headers: { Authorization: `Bearer ${key}`, apikey: key, "Content-Type": "application/json" },
       body: JSON.stringify({ prefixes: [path] }),
     });
