@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "vite",
     "build": "bash scripts/build-verified.sh",
-    "start": "vinext start --platform=node",
+    "start": "node dist/standalone/server.js",
     "test:unit": "node --experimental-strip-types --test tests/domain.test.ts",
     "test": "npm run test:unit && npm run build && node --test tests/rendered-html.test.mjs",
     "validate:artifact": "bash scripts/validate-artifact.sh",
