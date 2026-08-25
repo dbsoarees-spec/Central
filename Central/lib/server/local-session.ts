@@ -1,5 +1,4 @@
 export const LOCAL_SESSION_COOKIE = "cf_local_session";
-export const LOCAL_DEFAULT_PASSWORD = "123456";
 
 export type UserSession = {
   userId: string;
@@ -23,21 +22,16 @@ function base64UrlDecode(value: string) {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
-export async function configuredValue(name: string) {
-  const value = process.env[name];
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-export async function configuredInitialPassword() {
-  return (await configuredValue("CENTRAL_FRETE_PASSWORD")) || LOCAL_DEFAULT_PASSWORD;
-}
-
 async function sessionSecret() {
-  return (await configuredValue("CENTRAL_FRETE_SESSION_SECRET")) || `central-frete-session:${await configuredInitialPassword()}`;
+  const secret = process.env.CENTRAL_FRETE_SESSION_SECRET?.trim();
+  if (!secret) throw new Error("CENTRAL_FRETE_SESSION_SECRET não configurado.");
+  return secret;
 }
 
-async function digest(value: string) {
-  return new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
+async function derivePassword(password: string, salt: Uint8Array) {
+  const keyMaterial = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: 120_000 }, keyMaterial, 256);
+  return new Uint8Array(bits);
 }
 
 function constantTimeEqual(left: Uint8Array, right: Uint8Array) {
@@ -55,18 +49,6 @@ async function signature(payload: string) {
 export function isLocalRequest(request: Request) {
   const hostname = new URL(request.url).hostname.toLowerCase();
   return ["localhost", "127.0.0.1", "::1", "terminal.local"].includes(hostname);
-}
-
-export async function validateInitialPassword(value: unknown) {
-  const supplied = await digest(String(value ?? ""));
-  const expected = await digest(await configuredInitialPassword());
-  return constantTimeEqual(supplied, expected);
-}
-
-async function derivePassword(password: string, salt: Uint8Array) {
-  const keyMaterial = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: 120_000 }, keyMaterial, 256);
-  return new Uint8Array(bits);
 }
 
 export async function createPasswordCredential(passwordValue: unknown) {
