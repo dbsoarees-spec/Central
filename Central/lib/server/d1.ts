@@ -157,6 +157,139 @@ async function ensureSchemaCompatibility() {
         constraint sale_attachments_size_check check (size_bytes > 0)
       )`);
       await db.unsafe("create index if not exists sale_attachments_sale_idx on sale_attachments (sale_id, uploaded_at)");
+
+      // Vehicle inspection module. The module is intentionally isolated from
+      // freight_sales so it can later be linked to existing freight orders
+      // without changing the financial model.
+      await db.unsafe(`create table if not exists inspection_vehicles (
+        id text primary key not null,
+        client_id text references clients(id) on delete set null,
+        plate text not null,
+        chassis text,
+        renavam text,
+        brand text,
+        model text,
+        version text,
+        manufacture_year integer,
+        model_year integer,
+        color text,
+        current_mileage integer,
+        fuel_level integer,
+        notes text,
+        created_at text not null default current_timestamp,
+        updated_at text not null default current_timestamp
+      )`);
+      await db.unsafe("create index if not exists inspection_vehicles_plate_idx on inspection_vehicles (plate)");
+      await db.unsafe("create index if not exists inspection_vehicles_client_idx on inspection_vehicles (client_id)");
+
+      await db.unsafe(`create table if not exists inspection_orders (
+        id text primary key not null,
+        order_number text not null,
+        client_id text references clients(id) on delete set null,
+        vehicle_id text not null references inspection_vehicles(id) on delete restrict,
+        origin text not null,
+        destination text not null,
+        transport_company text,
+        driver_name text,
+        carrier_plate text,
+        status text not null default 'AGUARDANDO_COLETA',
+        planned_pickup_at text,
+        pickup_at text,
+        planned_delivery_at text,
+        delivered_at text,
+        notes text,
+        created_by text references users(id) on delete set null,
+        created_at text not null default current_timestamp,
+        updated_at text not null default current_timestamp,
+        constraint inspection_orders_status_check check (status in ('RASCUNHO','AGUARDANDO_COLETA','EM_COLETA','PATIO_ORIGEM','EM_TRANSITO','PATIO_DESTINO','AGUARDANDO_ENTREGA','ENTREGUE','ENCERRADA','CANCELADA','OCORRENCIA'))
+      )`);
+      await db.unsafe("create unique index if not exists inspection_orders_number_unique on inspection_orders (order_number)");
+      await db.unsafe("create index if not exists inspection_orders_status_idx on inspection_orders (status)");
+      await db.unsafe("create index if not exists inspection_orders_vehicle_idx on inspection_orders (vehicle_id)");
+      await db.unsafe("create index if not exists inspection_orders_client_idx on inspection_orders (client_id)");
+
+      await db.unsafe(`create table if not exists inspections (
+        id text primary key not null,
+        order_id text not null references inspection_orders(id) on delete cascade,
+        type text not null,
+        status text not null default 'EM_ANDAMENTO',
+        responsible_user_id text references users(id) on delete set null,
+        mileage integer,
+        fuel_level integer,
+        observations text,
+        latitude numeric,
+        longitude numeric,
+        started_at text not null default current_timestamp,
+        completed_at text,
+        constraint inspections_type_check check (type in ('COLETA','PATIO_ORIGEM','PATIO_DESTINO','ENTREGA_FINAL')),
+        constraint inspections_status_check check (status in ('EM_ANDAMENTO','CONCLUIDA','CANCELADA'))
+      )`);
+      await db.unsafe("create index if not exists inspections_order_idx on inspections (order_id, type)");
+
+      await db.unsafe(`create table if not exists inspection_items (
+        id text primary key not null,
+        inspection_id text not null references inspections(id) on delete cascade,
+        category text not null,
+        item text not null,
+        status text not null default 'NAO_CONFERIDO',
+        observation text,
+        created_at text not null default current_timestamp,
+        constraint inspection_items_status_check check (status in ('OK','AVARIA','NAO_APLICAVEL','NAO_CONFERIDO'))
+      )`);
+      await db.unsafe("create index if not exists inspection_items_inspection_idx on inspection_items (inspection_id)");
+
+      await db.unsafe(`create table if not exists inspection_damages (
+        id text primary key not null,
+        inspection_id text not null references inspections(id) on delete cascade,
+        type text not null,
+        category text,
+        description text not null,
+        location text,
+        position_x numeric,
+        position_y numeric,
+        severity text not null default 'LEVE',
+        created_by text references users(id) on delete set null,
+        created_at text not null default current_timestamp,
+        constraint inspection_damages_severity_check check (severity in ('LEVE','MEDIA','GRAVE'))
+      )`);
+      await db.unsafe("create index if not exists inspection_damages_inspection_idx on inspection_damages (inspection_id)");
+
+      await db.unsafe(`create table if not exists inspection_photos (
+        id text primary key not null,
+        inspection_id text not null references inspections(id) on delete cascade,
+        damage_id text references inspection_damages(id) on delete set null,
+        storage_path text not null,
+        file_name text not null,
+        photo_type text not null,
+        latitude numeric,
+        longitude numeric,
+        created_by text references users(id) on delete set null,
+        created_at text not null default current_timestamp
+      )`);
+      await db.unsafe("create index if not exists inspection_photos_inspection_idx on inspection_photos (inspection_id, created_at)");
+
+      await db.unsafe(`create table if not exists inspection_signatures (
+        id text primary key not null,
+        inspection_id text not null references inspections(id) on delete cascade,
+        name text not null,
+        document text,
+        signature_path text not null,
+        latitude numeric,
+        longitude numeric,
+        signed_at text not null default current_timestamp
+      )`);
+      await db.unsafe("create index if not exists inspection_signatures_inspection_idx on inspection_signatures (inspection_id)");
+
+      await db.unsafe(`create table if not exists inspection_events (
+        id text primary key not null,
+        order_id text not null references inspection_orders(id) on delete cascade,
+        event_type text not null,
+        description text not null,
+        user_id text references users(id) on delete set null,
+        metadata text,
+        created_at text not null default current_timestamp
+      )`);
+      await db.unsafe("create index if not exists inspection_events_order_idx on inspection_events (order_id, created_at)");
     })().catch((error) => {
       schemaReady = null;
       throw error;
